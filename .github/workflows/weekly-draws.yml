@@ -1,14 +1,9 @@
-# .github/workflows/weekly-draws.yml
-# CHAOS OBSERVATORY — 주간 수집 크론
-# 매주 토요일 추첨(20:35 KST) 후 자동 실행. 신규 회차만 커밋한다.
-# 최초 1회는 Actions 탭에서 수동 실행(Run workflow)으로 bootstrap.
-
 name: weekly-draws
 
 on:
   schedule:
-    - cron: "30 12 * * 6"  # 토 21:30 KST — 본 수집
-    - cron: "0 23 * * 6"   # 일 08:00 KST — 재시도
+    - cron: "30 12 * * 6"
+    - cron: "0 23 * * 6"
   workflow_dispatch: {}
 
 permissions:
@@ -23,6 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install --with-deps chromium
 
       - name: Fetch new draws
         run: node scripts/fetch-draws.mjs
