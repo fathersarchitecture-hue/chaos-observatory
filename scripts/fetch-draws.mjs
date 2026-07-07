@@ -1,12 +1,7 @@
 // scripts/fetch-draws.mjs
-// CHAOS OBSERVATORY — data pipeline (Playwright 버전)
-// 동행복권 JSON API는 WAF(JS 챌린지)에 막혀 순수 fetch로는 접근 불가하므로
-// headless 브라우저로 실제 결과 페이지(gameResult.do)를 읽어 파싱한다.
-
 import { chromium } from "playwright";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 
-const MAIN_URL = "https://www.dhlottery.co.kr/common.do?method=main";
 const RESULT_URL = (no) =>
   `https://www.dhlottery.co.kr/gameResult.do?method=byWin&drwNo=${no}`;
 const PATH = "data/draws.json";
@@ -34,24 +29,33 @@ async function main() {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   });
 
-  await page.goto(MAIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-  const latestAvailable = await page.$eval("#lottoDrwNo", (el) =>
-    parseInt(el.textContent.trim(), 10)
-  );
-  console.log(`latest available round on site: ${latestAvailable}`);
-
   let added = 0;
-  for (let no = db.latest + 1; no <= latestAvailable; no++) {
-    await page.goto(RESULT_URL(no), { waitUntil: "domcontentloaded", timeout: 30000 });
+  let no = db.latest + 1;
+  let consecutiveMisses = 0;
 
-    const numbers = await page.$$eval(
-      "div.num.win span",
-      (els) => els.map((el) => parseInt(el.textContent.trim(), 10))
-    );
-    const bonus = await page.$eval("div.num.bonus span", (el) =>
-      parseInt(el.textContent.trim(), 10)
-    );
-    const dateText = await page.$eval("p.desc", (el) => el.textContent.trim());
+  while (consecutiveMisses < 2) {
+    let numbers, bonus, dateText;
+    try {
+      await page.goto(RESULT_URL(no), { waitUntil: "networkidle", timeout: 30000 });
+      numbers = await page.$$eval("div.num.win span", (els) =>
+        els.map((el) => parseInt(el.textContent.trim(), 10))
+      );
+      bonus = await page.$eval("div.num.bonus span", (el) =>
+        parseInt(el.textContent.trim(), 10)
+      );
+      dateText = await page.$eval("p.desc", (el) => el.textContent.trim()).catch(() => "");
+    } catch (e) {
+      console.log(`  round ${no}: ${e.message.split("\n")[0]}`);
+      numbers = [];
+    }
+
+    if (!numbers || numbers.length !== 6 || !Number.isFinite(bonus)) {
+      consecutiveMisses++;
+      no++;
+      continue;
+    }
+    consecutiveMisses = 0;
+
     const dateMatch = dateText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
     const date = dateMatch
       ? `${dateMatch[1]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[3].padStart(2, "0")}`
@@ -69,12 +73,7 @@ async function main() {
         firstWinners = parseInt(nums[nums.length - 2].replace(/,/g, ""), 10);
       }
     } catch (e) {
-      /* 통계 파싱 실패는 무시 */
-    }
-
-    if (!numbers || numbers.length !== 6 || !Number.isFinite(bonus)) {
-      console.log(`  round ${no}: parse failed, stopping`);
-      break;
+      /* ignore */
     }
 
     db.draws.push({
@@ -89,7 +88,8 @@ async function main() {
     db.latest = no;
     added++;
     if (added % 50 === 0) console.log(`  ...round ${no}`);
-    await page.waitForTimeout(300);
+    no++;
+    await page.waitForTimeout(250);
   }
 
   await browser.close();
