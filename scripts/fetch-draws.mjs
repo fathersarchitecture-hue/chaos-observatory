@@ -1,41 +1,15 @@
 // scripts/fetch-draws.mjs
-// CHAOS OBSERVATORY — data pipeline
-// 동행복권 공식 API에서 신규 회차를 증분 수집해 data/draws.json에 적재한다.
-// - 최초 실행(bootstrap): 1회부터 최신까지 전체 수집 (~4분)
-// - 이후 실행: 마지막 회차 다음부터만 수집, 신규 없으면 무변경 종료
-// - Node 20+ (내장 fetch 사용, 의존성 없음)
+// CHAOS OBSERVATORY — data pipeline (Playwright 버전)
+// 동행복권 JSON API는 WAF(JS 챌린지)에 막혀 순수 fetch로는 접근 불가하므로
+// headless 브라우저로 실제 결과 페이지(gameResult.do)를 읽어 파싱한다.
 
+import { chromium } from "playwright";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 
-const API = "https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=";
+const MAIN_URL = "https://www.dhlottery.co.kr/common.do?method=main";
+const RESULT_URL = (no) =>
+  `https://www.dhlottery.co.kr/gameResult.do?method=byWin&drwNo=${no}`;
 const PATH = "data/draws.json";
-const DELAY_MS = 150; // polite rate limit
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function fetchRound(no) {
-  const res = await fetch(API + no, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      "Referer": "https://www.dhlottery.co.kr/gameResult.do?method=byWin",
-      "Accept": "application/json, text/plain, */*",
-    },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} @ round ${no}`);
-  const j = await res.json();
-  if (j.returnValue !== "success") return null; // 미추첨 회차 → 수집 종료 신호
-  return {
-    round: j.drwNo,
-    date: j.drwNoDate,
-    numbers: [j.drwtNo1, j.drwtNo2, j.drwtNo3, j.drwtNo4, j.drwtNo5, j.drwtNo6].sort(
-      (a, b) => a - b
-    ),
-    bonus: j.bnusNo,
-    firstWinners: j.firstPrzwnerCo,
-    firstPrizeEach: j.firstWinamnt,
-    totalSales: j.totSellamnt,
-  };
-}
 
 function validate(draws) {
   for (const d of draws) {
@@ -54,18 +28,71 @@ async function main() {
   let db = { updated: null, latest: 0, draws: [] };
   if (existsSync(PATH)) db = JSON.parse(readFileSync(PATH, "utf8"));
 
-  let no = db.latest + 1;
+  const browser = await chromium.launch();
+  const page = await browser.newPage({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  });
+
+  await page.goto(MAIN_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+  const latestAvailable = await page.$eval("#lottoDrwNo", (el) =>
+    parseInt(el.textContent.trim(), 10)
+  );
+  console.log(`latest available round on site: ${latestAvailable}`);
+
   let added = 0;
-  for (;;) {
-    const row = await fetchRound(no);
-    if (!row) break;
-    db.draws.push(row);
-    db.latest = row.round;
+  for (let no = db.latest + 1; no <= latestAvailable; no++) {
+    await page.goto(RESULT_URL(no), { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    const numbers = await page.$$eval(
+      "div.num.win span",
+      (els) => els.map((el) => parseInt(el.textContent.trim(), 10))
+    );
+    const bonus = await page.$eval("div.num.bonus span", (el) =>
+      parseInt(el.textContent.trim(), 10)
+    );
+    const dateText = await page.$eval("p.desc", (el) => el.textContent.trim());
+    const dateMatch = dateText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+    const date = dateMatch
+      ? `${dateMatch[1]}-${dateMatch[2].padStart(2, "0")}-${dateMatch[3].padStart(2, "0")}`
+      : null;
+
+    let firstWinners = null;
+    let firstPrizeEach = null;
+    try {
+      const rowText = await page.$eval("table.tbl_data tbody tr", (tr) =>
+        tr.textContent.replace(/\s+/g, " ").trim()
+      );
+      const nums = rowText.match(/[\d,]+/g) || [];
+      if (nums.length >= 2) {
+        firstPrizeEach = parseInt(nums[nums.length - 1].replace(/,/g, ""), 10);
+        firstWinners = parseInt(nums[nums.length - 2].replace(/,/g, ""), 10);
+      }
+    } catch (e) {
+      /* 통계 파싱 실패는 무시 */
+    }
+
+    if (!numbers || numbers.length !== 6 || !Number.isFinite(bonus)) {
+      console.log(`  round ${no}: parse failed, stopping`);
+      break;
+    }
+
+    db.draws.push({
+      round: no,
+      date,
+      numbers: numbers.sort((a, b) => a - b),
+      bonus,
+      firstWinners,
+      firstPrizeEach,
+      totalSales: null,
+    });
+    db.latest = no;
     added++;
-    if (added % 100 === 0) console.log(`  ...round ${row.round}`);
-    no++;
-    await sleep(DELAY_MS);
+    if (added % 50 === 0) console.log(`  ...round ${no}`);
+    await page.waitForTimeout(300);
   }
+
+  await browser.close();
 
   if (added === 0) {
     console.log("no new draws — ledger unchanged");
