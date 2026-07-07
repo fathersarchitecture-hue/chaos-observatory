@@ -15,7 +15,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchRound(no) {
   const res = await fetch(API + no, {
-    headers: { "User-Agent": "chaos-observatory/1.0" },
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Referer": "https://www.dhlottery.co.kr/gameResult.do?method=byWin",
+      "Accept": "application/json, text/plain, */*",
+    },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} @ round ${no}`);
   const j = await res.json();
