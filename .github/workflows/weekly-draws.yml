@@ -1,0 +1,41 @@
+# .github/workflows/weekly-draws.yml
+# CHAOS OBSERVATORY — 주간 수집 크론
+# 매주 토요일 추첨(20:35 KST) 후 자동 실행. 신규 회차만 커밋한다.
+# 최초 1회는 Actions 탭에서 수동 실행(Run workflow)으로 bootstrap.
+
+name: weekly-draws
+
+on:
+  schedule:
+    - cron: "30 12 * * 6"  # 토 21:30 KST — 본 수집
+    - cron: "0 23 * * 6"   # 일 08:00 KST — 재시도
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Fetch new draws
+        run: node scripts/fetch-draws.mjs
+
+      - name: Commit if changed
+        run: |
+          git config user.name "chaos-observatory"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/draws.json
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            LATEST=$(node -p "JSON.parse(require('fs').readFileSync('data/draws.json','utf8')).latest")
+            git commit -m "data: draws through round ${LATEST}"
+            git push
+          fi
