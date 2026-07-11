@@ -1,5 +1,6 @@
 // scripts/weekly.mjs
 // CHAOS OBSERVATORY — 주간 성좌 생성 + 원장 기록
+// L1·L2: 성좌 문법 (신호 × 위상다양성) / L3: 지움의 문법 (성격이 뚜렷한 것부터 지우고 남는 6개)
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const DRAWS_PATH  = "data/draws.json";
@@ -97,6 +98,7 @@ function softPick(cands, scores, T, rng) {
   return cands[cands.length-1];
 }
 
+// ── 성좌 문법: 신호 × 위상다양성 ──
 function genLine(sig, phase, banned, penalty, rng, T=1.1) {
   const avail = NUMS.filter(n => !banned.has(n));
   const base = n => sig[n] - (penalty[n]||0);
@@ -111,6 +113,17 @@ function genLine(sig, phase, banned, penalty, rng, T=1.1) {
   return sel.sort((a,b)=>a-b);
 }
 
+// ── 지움의 문법: 성격(신호 극단성 + 최근 사용)이 큰 것부터 지우고 남는 6개 ──
+function genErasure(sig, banned, penalty, rng, T=0.9) {
+  let alive = NUMS.filter(n => !banned.has(n));
+  while (alive.length > 6) {
+    const sc = alive.map(n => sig[n] + (penalty[n]||0)); // 성격 클수록 먼저 지워짐
+    const pick = softPick(alive, sc, T, rng);
+    alive = alive.filter(n => n !== pick);
+  }
+  return alive.sort((a,b)=>a-b);
+}
+
 function generateWeekly(round, drawsNums, history) {
   const rng = mulberry32(round);
   const { sig, phase } = computeStates(drawsNums);
@@ -123,11 +136,11 @@ function generateWeekly(round, drawsNums, history) {
   });
 
   const lines = [];
-  for (let li = 0; li < 3; li++) {
-    const usedPen = {};
-    lines.flat().forEach(n => { usedPen[n] = (usedPen[n]||0) + 2.5; });
+
+  // L1, L2 — 성좌 문법
+  for (let li = 0; li < 2; li++) {
     const pen = { ...penalty };
-    for (const n in usedPen) pen[n] = (pen[n]||0) + usedPen[n];
+    lines.flat().forEach(n => { pen[n] = (pen[n]||0) + 2.5; });
     let pool = [];
     for (let i=0;i<250;i++) pool.push(genLine(sig, phase, banned, pen, rng));
     let ok = pool.filter(c => inNML(c) && lines.every(p => c.filter(n=>p.includes(n)).length<=1));
@@ -138,9 +151,26 @@ function generateWeekly(round, drawsNums, history) {
     lines.push(ok[0]);
   }
 
+  // L3 — 지움의 문법 (뭇별에서 남는 것)
+  {
+    const pen = { ...penalty };
+    lines.flat().forEach(n => { pen[n] = (pen[n]||0) + 2.5; }); // L1·L2 소속은 성격 가산 → 먼저 지워짐
+    let pool = [];
+    for (let i=0;i<150;i++) pool.push(genErasure(sig, banned, pen, rng));
+    let ok = pool.filter(c => inNML(c) && lines.every(p => c.filter(n=>p.includes(n)).length<=1));
+    if (!ok.length) ok = pool.filter(c => inNML(c));
+    if (!ok.length) ok = pool;
+    // 가장 무성격한(신호 합이 낮은) 생존 조합 선택
+    ok.sort((a,b) =>
+      a.reduce((s,n)=>s+sig[n],0) - b.reduce((s,n)=>s+sig[n],0)
+    );
+    lines.push(ok[0]);
+  }
+
   return {
     round,
     lines,
+    grammars: ["constellation","constellation","erasure"],
     kpis: lines.map(c => ({
       sum: c.reduce((a,b)=>a+b,0),
       odd: c.filter(n=>n%2).length,
@@ -165,7 +195,7 @@ function main() {
 
   const entry = generateWeekly(targetRound, db.draws.map(d => d.numbers), ledger.entries);
   entry.generatedAt = new Date().toISOString();
-  entry.engineVersion = "v7";
+  entry.engineVersion = "v8-erasure";
 
   ledger.entries.push(entry);
   ledger.entries = ledger.entries.slice(-8);
@@ -174,7 +204,7 @@ function main() {
   writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2) + "\n");
   console.log(`round ${targetRound} → ledger`);
   entry.lines.forEach((l,i) =>
-    console.log(`  L${i+1}: [${l}]  sum=${entry.kpis[i].sum} fails=${entry.kpis[i].filterFails} nml=${entry.kpis[i].nml}`)
+    console.log(`  L${i+1}(${entry.grammars[i]}): [${l}]  sum=${entry.kpis[i].sum} nml=${entry.kpis[i].nml}`)
   );
 }
 
