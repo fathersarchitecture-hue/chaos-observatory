@@ -50,7 +50,63 @@
       ],
       "generatedAt": "2026-07-07T07:44:46.258Z",
       "engineVersion": "v7"
+    },
+    {
+      "round": 1233,
+      "lines": [
+        [
+          10,
+          12,
+          22,
+          24,
+          32,
+          45
+        ],
+        [
+          11,
+          17,
+          28,
+          33,
+          34,
+          37
+        ],
+        [
+          1,
+          25,
+          26,
+          30,
+          35,
+          41
+        ]
+      ],
+      "grammars": [
+        "constellation",
+        "constellation",
+        "erasure"
+      ],
+      "kpis": [
+        {
+          "sum": 145,
+          "odd": 1,
+          "filterFails": 2,
+          "nml": true
+        },
+        {
+          "sum": 160,
+          "odd": 4,
+          "filterFails": 2,
+          "nml": true
+        },
+        {
+          "sum": 158,
+          "odd": 4,
+          "filterFails": 3,
+          "nml": true
+        }
+      ],
+      "generatedAt": "2026-07-11T19:08:54.614Z",
+      "engineVersion": "v8-erasure"
     }
   ],
-  "updatedAt": "2026-07-07T07:44:46.259Z"
+  "updatedAt": "2026-07-11T19:08:54.614Z"
 }
