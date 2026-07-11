@@ -1,6 +1,6 @@
 {
   "updated": "2026-07-07T00:00:00.000Z",
-  "latest": 1231,
+  "latest": 1232,
   "draws": [
     {
       "round": 1,
@@ -19697,6 +19697,22 @@
       "firstWinners": 17,
       "firstPrizeEach": 1652990074,
       "totalSales": null
-    }
+              },
+        {
+          "round": 1232,
+          "date": "2026-07-11",
+          "numbers": [
+            12,
+            15,
+            19,
+            22,
+            24,
+            36
+          ],
+          "bonus": 3,
+          "firstWinners": 11,
+          "firstPrizeEach": 2533260819,
+          "totalSales": null
+        }
   ]
 }
